@@ -38,6 +38,8 @@ import './libs/SVGPathDecoder.sol';
 /*
  * Abstract contract that implements the categolized asset storage system. 
  */
+ //〇IAssetStoreRegistryをここで継承しているのは、AssetInfoとPartを共有するため？？
+ //〇AssetStoreCoreがインターフェースがないのは外部とのやり取りがないため
 abstract contract AssetStoreCore is Ownable, IAssetStoreRegistry {
   using StringSet for StringSet.Set;
   using Strings for uint16;
@@ -54,27 +56,37 @@ abstract contract AssetStoreCore is Ownable, IAssetStoreRegistry {
   }
 
   // Upgradable string validator
+  //■どうやってアップグレード可能にしているか？
   IStringValidator public validator;
 
   // Upgradable path decoder
   IPathDecoder public decoder;
 
   // asset & part database
+  //〇PartはIAssetStoreRegistryで保持
   mapping(uint256 => Asset) private assets;
   uint256 private nextAssetIndex = 1; // 0 indicates an error
   mapping(uint256 => Part) private parts;
   uint256 private nextPartIndex = 1; // 0 indicates an error
 
   // Groups and categories(for browsing)
+  //〇groupSet内にはnames=groupsのマッピング
+  //■String.Setは構造体だから複数格納できる？？
+  //〇→構造体は型の定義であって、状態変数ではない。実質StringSet.Setは、このcontractに登録する必要がある。
+  //〇→オブジェクト指向のようにオブジェクト→インスタンス的なものを作るのであればlibraryにする必要がある。
   StringSet.Set internal groupSet;
+  //〇groupId→categorySetの対応付けとなる。
   mapping(uint32 => StringSet.Set) internal categorySets;
   
   // Grouped and categorized assetIds (for browsing)
+  //〇ここもString.Setと同じような形
   struct AssetCatalog {
+    //■ここのkeyは何？？ただの順番？？
     mapping(uint32 => uint256) assetIds; 
     uint32 nextAssetIndex;
     mapping(string => uint256) assetNameToId;
   }
+  //〇groupId　→　categoryId　→ AssetCatalog ※Asset内にgroupIdとcategoryIdは持っているものの。。
   mapping(uint32 => mapping(uint32 => AssetCatalog)) internal assetCatalogs;
 
   constructor() {
@@ -89,6 +101,7 @@ abstract contract AssetStoreCore is Ownable, IAssetStoreRegistry {
   function _getGroupId(string memory group) private returns(uint32) {
     (uint32 id, bool created) = groupSet.getOrCreateId(group, validator);
     if (created) {
+      //■フロント側ではこのイベント通知を受けて何している？？
       emit GroupAdded(group); 
     }
     return id;
@@ -103,6 +116,7 @@ abstract contract AssetStoreCore is Ownable, IAssetStoreRegistry {
     StringSet.Set storage categorySet =  categorySets[groupId];
     (uint32 id, bool created) = categorySet.getOrCreateId(category, validator);
     if (created) {
+      //■同上
       emit CategoryAdded(group, category);
     }
     return id;
@@ -112,6 +126,7 @@ abstract contract AssetStoreCore is Ownable, IAssetStoreRegistry {
    * Register a Part and returns its id, which is its index in parts[].
    */
   function _registerPart(Part memory _part) private returns(uint256) {
+    //〇mappingは配列のように呼び出し可能
     parts[nextPartIndex++] = _part;
     return nextPartIndex-1;    
   }

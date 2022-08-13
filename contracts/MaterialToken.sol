@@ -18,20 +18,30 @@ pragma solidity ^0.8.6;
 
 import { Ownable } from '@openzeppelin/contracts/access/Ownable.sol';
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+//■erc721aの実態はどこにある？？
+//〇→package.jsonで指定することで使えている
 import "erc721a/contracts/ERC721A.sol";
 import { IAssetStoreRegistry, IAssetStore } from './interfaces/IAssetStore.sol';
 import { IAssetStoreToken } from './interfaces/IAssetStoreToken.sol';
+//〇base64もpackage.jsonで指定することで使えている
 import { Base64 } from 'base64-sol/base64.sol';
 import "@openzeppelin/contracts/utils/Strings.sol";
 import { IProxyRegistry } from './external/opensea/IProxyRegistry.sol';
 
 contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
+
+  //〇StringsのLibraryが使える。value.toString()などの型変換
   using Strings for uint256;
   using Strings for uint16;
 
+  //〇immutableは定数とは違い、初期デプロイ時（=construct起動時に設定されて変更できないもの、ガス代の節約？？）
   IAssetStoreRegistry public immutable registry;
   IAssetStore public immutable assetStore;
 
+  //〇１つのアセットに対していくつtokenを発行するか。マテリアルアイコンの場合は4つ
+  //■tokenIdはMaterialToken内だけのものなのだろうか？？
+  //〇→その通りだった。token group内で採番されている
+  //〇AssetIdはAsset全体での採番
   uint256 constant tokensPerAsset = 4;
   mapping(uint256 => uint256) assetIds; // tokenId / tokensPerAsset => assetId
 
@@ -47,6 +57,8 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
   /*
    * @notice both _registry and _assetStore points to the AssetStore.
    */
+   //〇ECR721Aのコンストラクターに値を渡している。
+   //■MaterialTokenはどこでコンストラクターが呼び出されているか。。要確認
   constructor(
     IAssetStoreRegistry _registry, 
     IAssetStore _assetStore,
@@ -59,6 +71,7 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
     proxyRegistry = _proxyRegistry;
   }
 
+  //■プライマリートークンかどうか。なぜプライマリーが必要？？ERC721Aの仕様ではなかった。
   function _isPrimary(uint256 _tokenId) internal pure returns(bool) {
     return _tokenId % tokensPerAsset == 0;
   }
@@ -68,22 +81,37 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
    * mint three tokens to the msg.sender, and one additional
    * token to either the affiliator, the developer or the owner.npnkda
    */
+   //〇IAssetStoreRegistry is a interface for contracts to register Assets
+   //〇Parts of assetInfo are viewed at opensea
+   //〇affiliate = primary token of affiliater
   function mintWithAsset(IAssetStoreRegistry.AssetInfo memory _assetInfo, uint256 _affiliate) external {
+
+    //〇group is registered by hard cording
     _assetInfo.group = "Material Icons (Apache 2.0)";
+    //〇Assets are registered here.Assets are numbered.
     uint256 assetId = registry.registerAsset(_assetInfo);
+    //〇_nextTokenId is defined in ERC721A.
     uint256 tokenId = _nextTokenId(); 
 
+    //〇AssetId is identified not in only Material but in all assets
     assetIds[tokenId / tokensPerAsset] = assetId;
+    //〇_mint is implemented in ERC721A for bulk mint.
+    //〇3 of 4 for minter
     _mint(msg.sender, tokensPerAsset - 1);
 
     // Specified affliate token must be one of soul-bound token and not owned by the minter.
+    //〇こちらのownerOfはECR721トークンとしてのOwner
     if (_affiliate > 0 && _isPrimary(_affiliate) && ownerOf(_affiliate) != msg.sender) {
       _mint(ownerOf(_affiliate), 1);
     } else if ((tokenId / tokensPerAsset) % 4 == 0) {
       // 1 in 24 tokens goes to the developer
+      //〇これは間違いでは？？16個に一つ？？tokenIdは4個ずつ増える、4回のmintに1回？
       _mint(developer, 1);
     } else {
       // the rest goes to the owner for distribution
+      //■owner()はどこに定義されている？？
+      //〇→Ownable内だった。×トークンのオーナーを返す。コントラクトのownerを返す。
+      //■developerとownerで分けているのはなぜか？？
       _mint(owner(), 1);
     }
   }
@@ -97,6 +125,8 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
   /**
     * @notice Override isApprovedForAll to whitelist user's OpenSea proxy accounts to enable gas-less listings.
     */
+  //〇isApprovedForAllはERC721の規格
+  //■open seaに取引代行の権限移譲されているかの確認？
   function isApprovedForAll(address owner, address operator) public view override returns (bool) {
       // Whitelist OpenSea proxy contract for easy trading.
       if (proxyRegistry.proxies(owner) == operator) {
@@ -124,6 +154,7 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
    * A function of IAssetStoreToken interface.
    * It generates SVG with the specified style, using the given "SVG Part".
    */
+   //〇styleはトークンの色パターン
   function generateSVG(string memory _svgPart, uint256 _style, string memory _tag) public pure override returns (string memory) {
     bytes memory assetTag = abi.encodePacked('#', _tag);
     bytes memory image = abi.encodePacked(
@@ -131,16 +162,19 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
       _svgPart,
       '</defs>\n'
       '<g filter="url(#f1)">\n');
+    //〇sytle==0はプライマリー
     if (_style == 0) {
       image = abi.encodePacked(image,
       ' <mask id="assetMask">\n'
       '  <use href="', assetTag, '" fill="white" />\n'
       ' </mask>\n'
       ' <use href="#base" mask="url(#assetMask)" />\n');
+    //〇その他のボーナストークン（_style < tokensPerAsset - 1）以外のトークン
     } else if (_style < tokensPerAsset - 1) {
       image = abi.encodePacked(image,
       ' <use href="#base" />\n'
       ' <use href="', assetTag, '" fill="',(_style % 2 == 0) ? 'black':'white','" />\n');
+    //〇ボーナストークン
     } else {
       image = abi.encodePacked(image,
       ' <mask id="assetMask" desc="Material Icons (Apache 2.0)/Social/Public">\n'
@@ -165,10 +199,12 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
    * A function of IAssetStoreToken interface.
    * Each 16-bit represents the number of possible styles, allowing various combinations.
    */
+  //■それぞれの16-bitが、可能なstyleの数を表わす・・・という部分がまだ理解不能
   function styles() external pure override returns(uint256) {
     return tokensPerAsset;
   }
 
+  //〇下のtokenURIで使っている内部関数
   function _generateTraits(uint256 _tokenId, IAssetStore.AssetAttributes memory _attr) internal view returns (bytes memory) {
     return abi.encodePacked(
       '{'
@@ -188,6 +224,7 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
     );
   }
 
+  //〇初期値セットされているが、Ownerが変更できるようにしている。
   function setDescription(string memory _description) external onlyOwner {
       description = _description;
   }
@@ -196,6 +233,7 @@ contract MaterialToken is Ownable, ERC721A, IAssetStoreToken {
     * @notice A distinct Uniform Resource Identifier (URI) for a given asset.
     * @dev See {IERC721Metadata-tokenURI}.
     */
+  //〇data:application/json;base64,「jsonをbase64エンコードしたもの」でjsonデータを返却できる。
   function tokenURI(uint256 _tokenId) public view override returns (string memory) {
     require(_exists(_tokenId), 'MaterialToken.tokenURI: nonexistent token');
     uint256 assetId = assetIdOfToken(_tokenId);
